@@ -146,25 +146,12 @@ class DataGenerator(object):
 
 def main():
 
-    """
-     CREATE TABLE IF NOT EXISTS public.users
-    (
-        first_name character varying(256) COLLATE pg_catalog."default",
-        last_name character varying(256) COLLATE pg_catalog."default",
-        address character varying(256) COLLATE pg_catalog."default",
-        text character varying(256) COLLATE pg_catalog."default",
-        id character varying(256) COLLATE pg_catalog."default",
-        city character varying(256) COLLATE pg_catalog."default",
-        state character varying(256) COLLATE pg_catalog."default"
-    )
-
-    """
     for i in range(0,10):
         data = DataGenerator.get_data()
         helper_process_files = AWSS3(
             aws_access_key_id="<ACCESS_KEY>",
             aws_secret_access_key="<SECRET KEY>",
-            region_name="<ACTIVE REGION>",
+            region_name="<REGION>",
             bucket="<ENDPOINT GOES HERE>"
         )
         key = f"data/{uuid.uuid4().__str__()}.json"
