@@ -1,6 +1,9 @@
 """
 --conf | spark.serializer=org.apache.spark.serializer.KryoSerializer  --conf spark.sql.hive.convertMetastoreParquet=false --conf spark.sql.hive.convertMetastoreParquet=false --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.hudi.catalog.HoodieCatalog --conf spark.sql.legacy.pathOptionBehavior.enabled=true --conf spark.sql.extensions=org.apache.spark.sql.hudi.HoodieSparkSessionExtension
 --datalake-formats | hudi
+
+https://docs.aws.amazon.com/athena/latest/ug/notebooks-spark-table-formats-apache-hudi.html
+
 """
 from pyspark.sql.session import SparkSession
 from awsglue.context import GlueContext
