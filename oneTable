@@ -1,0 +1,116 @@
+
+
+```
+
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, LongType, StringType, FloatType
+import os
+import sys
+
+HUDI_VERSION = '0.14.0'
+SPARK_VERSION = '3.4'
+
+# Use --packages option in PYSPARK_SUBMIT_ARGS
+SUBMIT_ARGS = f"--packages org.apache.hudi:hudi-spark{SPARK_VERSION}-bundle_2.12:{HUDI_VERSION} pyspark-shell"
+os.environ["PYSPARK_SUBMIT_ARGS"] = SUBMIT_ARGS
+os.environ['PYSPARK_PYTHON'] = sys.executable
+
+# Create a Spark session
+spark = SparkSession.builder \
+    .config('spark.serializer', 'org.apache.spark.serializer.KryoSerializer') \
+    .config('spark.sql.extensions', 'org.apache.spark.sql.hudi.HoodieSparkSessionExtension') \
+    .config('spark.sql.hive.convertMetastoreParquet', 'false') \
+    .getOrCreate()
+
+# Sample data
+data = [
+    [1695159649, '334e26e9-8355-45cc-97c6-c31daf0df330', 'rider-A', 'driver-K', 19.10, 'san_francisco'],
+    [1695159649, 'e96c4396-3fad-413a-a942-4cb36106d721', 'rider-C', 'driver-M', 27.70, 'san_francisco'],
+]
+
+# Define schema for the DataFrame
+schema = StructType([
+    StructField("ts", LongType(), True),
+    StructField("transaction_id", StringType(), True),
+    StructField("rider", StringType(), True),
+    StructField("driver", StringType(), True),
+    StructField("price", FloatType(), True),
+    StructField("location", StringType(), True),
+])
+
+# Create Spark DataFrame
+df = spark.createDataFrame(data, schema=schema)
+
+# Show DataFrame
+df.show()
+
+
+path = 'file:///Users/soumilnitinshah/Downloads/hudidb/hudi_table'
+
+
+hudi_options = {
+    'hoodie.table.name': 'hudi_table_func_index',
+    'hoodie.datasource.write.table.type': 'COPY_ON_WRITE',
+    'hoodie.datasource.write.operation': 'upsert',
+    'hoodie.datasource.write.recordkey.field': 'transaction_id',
+    'hoodie.datasource.write.precombine.field': 'ts',
+    'hoodie.table.metadata.enable': 'true',
+    'hoodie.datasource.write.partitionpath.field': 'location',
+    'hoodie.datasource.write.hive_style_partitioning': 'true'
+}
+
+df.write.format("hudi").options(**hudi_options).mode("append").save(path)
+
+
+```
+
+
+# Configure YML for OneTable
+
+
+* Create File my_config.yaml
+```
+sourceFormat: HUDI
+targetFormats:
+  - DELTA
+datasets:
+  -
+    tableBasePath: file:///Users/soumilnitinshah/Downloads/hudidb/hudi_table
+    tableName: hudi_table_func_index
+    partitionSpec: location:VALUE
+    
+```
+
+### Run Command for Sync
+
+
+```
+java -jar utilities-0.1.0-beta1-bundled.jar  --datasetConfig my_config.yaml
+```
+
+
+# Read Hudi tables as Delta Tables 
+```
+
+from pyspark.sql import SparkSession
+
+SPARK_VERSION = '3.4'
+DELTA_VERSION = '2.4.0'  # Adjust the Delta version based on compatibility
+
+# Use --packages and --conf options directly in PySpark code
+spark = SparkSession.builder \
+    .appName("DeltaReadExample") \
+    .config('spark.sql.extensions', 'io.delta.sql.DeltaSparkSessionExtension') \
+    .config('spark.sql.catalog.spark_catalog', 'org.apache.spark.sql.delta.catalog.DeltaCatalog') \
+    .config('spark.jars.packages', f'io.delta:delta-core_2.12:{DELTA_VERSION}') \
+    .getOrCreate()
+
+# Read data from Delta table
+delta_table_path = "file:///Users/soumilnitinshah/Downloads/hudidb/hudi_table"
+df = spark.read.format("delta").load(delta_table_path)
+
+# Show DataFrame
+df.show()
+
+```
+
