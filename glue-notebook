@@ -1,0 +1,28 @@
+
+%idle_timeout 2880
+%glue_version 4.0
+%worker_type G.1X
+%number_of_workers 5
+
+%%configure
+{
+    "--conf": "spark.serializer=org.apache.spark.serializer.KryoSerializer --conf spark.sql.hive.convertMetastoreParquet=false",
+    "--enable-glue-datacatalog" :"true",
+    "--datalake-formats":"hudi"
+}
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+
+sc = SparkContext.getOrCreate()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+
+
+spark.sql("show databases;").show()
+spark.sql("use default;").show()
+spark.sql("show tables;").show()
