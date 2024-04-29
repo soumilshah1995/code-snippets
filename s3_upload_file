@@ -1,0 +1,118 @@
+import os, sys
+import math
+import boto3
+from dotenv import load_dotenv
+from boto3.s3.transfer import TransferConfig
+
+load_dotenv("dev.env")
+
+class Size:
+    @staticmethod
+    def convert_size(size_bytes):
+        """Convert bytes to a human-readable format."""
+        if size_bytes == 0:
+            return "0B"
+        size_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
+        i = int(math.floor(math.log(size_bytes, 1024)))
+        p = math.pow(1024, i)
+        s = round(size_bytes / p, 2)
+        return "%s %s" % (s, size_name[i])
+
+class ProgressPercentage(object):
+    def __init__(self, filename, filesize):
+        """Initialize ProgressPercentage with file name and total file size."""
+        self._filename = filename
+        self._size = filesize
+        self._seen_so_far = 0
+
+    def __call__(self, bytes_amount):
+        """Callback function to print upload/download progress."""
+        self._seen_so_far += bytes_amount
+        percentage = (self._seen_so_far / self._size) * 100
+        print(
+            "\r%s  %s / %s  (%.2f%%)        "
+            % (
+                self._filename,
+                Size.convert_size(self._seen_so_far),
+                Size.convert_size(self._size),
+                percentage,
+            ),
+            end=""
+        )
+        sys.stdout.flush()
+
+class AWSS3(object):
+    """Helper class for Amazon S3 operations"""
+
+    def __init__(self, bucket):
+        """Initialize AWS S3 client."""
+        self.BucketName = bucket
+        self.client = boto3.client(
+            "s3",
+            aws_access_key_id=os.getenv("AWS_ACCESS_KEY"),
+            aws_secret_access_key=os.getenv("AWS_SECRET_KEY"),
+            region_name=os.getenv("AWS_REGION")
+        )
+
+    def download_file_with_progress(self, key, file_name):
+        """
+        Download a file from S3 bucket with progress.
+
+        Parameters:
+            - key: S3 object key
+            - file_name: Name to save the downloaded file locally
+        """
+        response = self.client.download_file(
+            Bucket=self.BucketName,
+            Filename=file_name,
+            Key=key,
+            Config=TransferConfig(max_concurrency=10, use_threads=True),
+            Callback=ProgressPercentage(
+                file_name,
+                (self.client.head_object(Bucket=self.BucketName, Key=key))[
+                    "ContentLength"
+                ],
+            ),
+        )
+
+    def upload_file_with_progress(self, file_name, key):
+        """
+        Upload a file to S3 bucket with progress.
+
+        Parameters:
+            - file_name: Local file path to upload
+            - key: S3 object key to save the file with
+        """
+        try:
+            # Get the file size
+            file_size = os.path.getsize(file_name)
+            # Start the upload with progress
+            response = self.client.upload_file(
+                Filename=file_name,
+                Bucket=self.BucketName,
+                Key=key,
+                Config=TransferConfig(
+                    multipart_threshold=4 * 1024,
+                    max_concurrency=10,
+                    use_threads=True
+                ),
+                Callback=ProgressPercentage(file_name, file_size)
+            )
+            return response  # Add this line to return the response
+        except Exception as e:
+            print(f"Error uploading file: {e}")
+            return False
+
+def main():
+    bucket = "<BUCKET>"
+
+    s3_client = AWSS3(bucket)
+
+    # Example usage: Upload a file
+    #s3_client.upload_file_with_progress("sample.csv.zip", "raw/sample.csv.zip")
+
+    # Example usage: Download a file
+    #s3_client.download_file_with_progress("raw/sample.csv.zip", "download_sample.csv.zip")
+
+if __name__ == "__main__":
+    main()
