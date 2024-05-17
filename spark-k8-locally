@@ -1,0 +1,21 @@
+
+
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm install spark-cluster bitnami/spark
+helm upgrade spark-cluster bitnami/spark --set service.type=LoadBalancer --set worker.replicaCount=3
+kubectl get pod
+
+kubectl get svc 
+
+export EXAMPLE_JAR=$(kubectl exec -ti --namespace default spark-cluster-worker-0 -- find examples/jars/ -name 'spark-example*\.jar' | tr -d '\r')
+
+kubectl exec -ti \
+    --namespace default spark-cluster-master-0 \
+    -- spark-submit \
+    --master  spark://spark-cluster-master-0.spark-cluster-headless.default.svc.cluster.local:7077 \
+    --class org.apache.spark.examples.SparkPi \
+    $EXAMPLE_JAR 5
+
+Pi is roughly
+
+helm uninstall spark-cluster
