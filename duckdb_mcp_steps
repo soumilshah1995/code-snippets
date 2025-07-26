@@ -1,1 +1,63 @@
 
+SAMPLE DATASET
+
+
+
+curl -O "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2022-01.parquet"
+
+
+
+
+
+
+INTELLIJI Github CO pilot
+
+{
+    "servers": {
+        "mcp-server-motherduck": {
+            "type": "stdio",
+            "command": "/opt/anaconda3/bin/uvx",
+            "args": [
+                "mcp-server-motherduck",
+                "--db-path",
+                ":memory:"
+            ]
+        },
+        "filesystem": {
+            "type": "stdio",
+            "command": "/opt/anaconda3/bin/uvx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-filesystem",
+                "/Users/soumilshah/IdeaProjects/MCP/json/data"
+            ]
+        }
+    }
+}
+
+
+
+CLAUDE DESKTOP
+{
+  "mcpServers": {
+    "mcp-server-motherduck": {
+      "command": "/opt/anaconda3/bin/uvx",
+      "args": [
+        "mcp-server-motherduck",
+        "--db-path",
+        ":memory:"
+      ]
+    },
+    "filesystem": {
+      "type": "stdio",
+      "command": "/opt/anaconda3/bin/uvx",
+      "args": [
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/soumilshah/IdeaProjects/MCP/json/data"
+      ]
+    }
+  }
+}
+
+
+
