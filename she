@@ -1,0 +1,158 @@
+from pyspark.sql import SparkSession
+import pyspark
+import os, sys
+
+# Set Java Home environment variable if needed
+os.environ["JAVA_HOME"] = "/opt/homebrew/opt/openjdk@11"
+SPARK_VERSION = '3.4'
+ICEBERG_VERSION = "1.9.2"
+
+SUBMIT_ARGS = f"--packages org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:{ICEBERG_VERSION},software.amazon.awssdk:bundle:2.20.160,software.amazon.awssdk:url-connection-client:2.20.160,org.apache.hadoop:hadoop-aws:3.3.4 pyspark-shell"
+os.environ["PYSPARK_SUBMIT_ARGS"] = SUBMIT_ARGS
+os.environ['PYSPARK_PYTHON'] = sys.executable
+print(SUBMIT_ARGS)
+
+
+spark = SparkSession.builder \
+    .appName("IcebergVariantDemo") \
+    .config(
+    "spark.jars.packages",
+    f"org.apache.iceberg:iceberg-spark-runtime-{SPARK_VERSION}_2.12:{ICEBERG_VERSION},"
+    f"org.apache.iceberg:iceberg-core:{ICEBERG_VERSION}") \
+    .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
+    .config("spark.sql.catalog.dev", "org.apache.iceberg.spark.SparkCatalog") \
+    .config("spark.sql.catalog.dev.type", "hadoop") \
+    .config("spark.sql.catalog.dev.warehouse", "file:///Users/soumilshah/Desktop/warehouse/") \
+    .getOrCreate()
+
+
+# ——————————————————————————————
+# Create example target Iceberg table
+# ——————————————————————————————
+spark.sql("""
+CREATE TABLE IF NOT EXISTS dev.db.emp_bv_details (
+  id BIGINT,
+  business_vertical STRING,
+  year INT,
+  is_updated BOOLEAN
+)
+USING iceberg
+PARTITIONED BY (year)
+TBLPROPERTIES (
+  'format-version' = '2',
+  'write.delete.mode' = 'merge-on-read',
+  'write.update.mode' = 'merge-on-read',
+  'write.merge.mode' = 'merge-on-read',
+  'write.spark.fanout.enabled' = 'true'
+)
+""")
+
+
+from pyspark.sql.functions import when, lit, rand, col
+
+base = (
+    spark.range(30000)
+    .withColumn("year",
+                when(col("id") <= 10000, lit(2023))
+                .when(col("id").between(10001, 15000), lit(2024))
+                .otherwise(lit(2025))
+                )
+    .withColumn("business_vertical",
+                # pick one of 4 strings at random
+                (rand()*4).cast("int")
+                .cast("int")
+                )
+    .withColumn("business_vertical",
+                when(col("business_vertical") == 0, lit("Retail"))
+                .when(col("business_vertical") == 1, lit("SME"))
+                .when(col("business_vertical") == 2, lit("Cor"))
+                .otherwise(lit("Analytics"))
+                )
+    .withColumn("is_updated", lit(False))
+)
+
+base.coalesce(4).writeTo("dev.db.emp_bv_details").append()
+
+
+# Updaes
+
+from pyspark.sql.functions import lit
+
+STG_TBL = "dev.db.emp_bv_updates"
+
+# Create updates DataFrame
+updates = (
+    spark.range(15000, 18001)
+    .withColumn("year", lit(2025))
+    .withColumn("business_vertical", lit("Sales"))
+)
+
+# Step 1: Create the Iceberg table if it does not exist
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {STG_TBL} (
+    id BIGINT,
+    year INT,
+    business_vertical STRING
+) USING ICEBERG
+PARTITIONED BY (year)
+""")
+
+# Step 2: Insert the data
+updates.writeTo(STG_TBL).append()   # use append() for first-time load or incremental inserts
+
+# Step 3: Verify
+spark.sql(f"SELECT * FROM {STG_TBL} LIMIT 5").show()
+
+# --------------------------------------------------
+# CASE 1 NO FILTER
+# --------------------------------------------------
+spark.conf.set("spark.sql.join.preferSortMergeJoin", "true")
+spark.conf.set("spark.sql.adaptive.enabled", "false")
+
+spark.sparkContext.setJobGroup(
+    "merge-query",
+    "No Push Down Filters and SMJ"
+)
+
+spark.sql("""
+MERGE INTO  dev.db.emp_bv_details AS tgt
+USING (
+  SELECT *, FALSE AS is_updated
+  FROM dev.db.emp_bv_updates
+) AS src
+ON tgt.id = src.id 
+WHEN MATCHED AND tgt.business_vertical <> src.business_vertical THEN
+  UPDATE SET tgt.business_vertical = src.business_vertical, tgt.is_updated = TRUE
+WHEN NOT MATCHED THEN
+  INSERT *
+""")
+
+
+# --------------------------------------------------
+# CASE 2 NO FILTER TRY SHJ
+# --------------------------------------------------
+
+spark.conf.set("spark.sql.join.preferSortMergeJoin", "false")
+spark.conf.set("spark.sql.adaptive.enabled", "false")
+spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")  # Completely disable broadcast
+spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "false")
+spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "false")
+spark.conf.set("spark.sql.shuffle.partitions", "100")
+
+spark.sparkContext.setJobGroup(
+    "merge-query",
+    "No Push Down Filters and SHJ"
+)
+
+spark.sql("""
+MERGE INTO  dev.db.emp_bv_details AS tgt
+USING (
+  SELECT *, FALSE AS is_updated
+  FROM dev.db.emp_bv_updates
+) AS src
+ON src.id = tgt.id
+WHEN MATCHED AND tgt.business_vertical <> src.business_vertical THEN
+  UPDATE SET *
+WHEN NOT MATCHED THEN
+  INSERT *
+""")
