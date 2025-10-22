@@ -1,0 +1,80 @@
+stages:
+  - create-tables
+
+variables:
+  AWS_DEFAULT_REGION: us-east-1
+  TABLE_DEFINITIONS_DIR: table-definitions
+
+create-s3-tables:
+  stage: create-tables
+  image:
+    name: amazon/aws-cli:latest
+    entrypoint: [""]
+  variables:
+    AWS_ACCESS_KEY_ID: "$AWS_ACCESS_KEY_ID"
+    AWS_SECRET_ACCESS_KEY: "$AWS_SECRET_ACCESS_KEY"
+    AWS_DEFAULT_REGION: "$AWS_DEFAULT_REGION"
+  before_script:
+    - yum install -y jq git python3-pip
+    - pip3 install pyyaml
+    - |
+      # Verify AWS credentials are set
+      if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+        echo "ERROR: AWS credentials are not set!"
+        echo "Please configure AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in GitLab CI/CD variables"
+        exit 1
+      fi
+      echo "AWS credentials configured successfully"
+  script:
+    - |
+      echo "Checking for new or modified table definition files..."
+      
+      # Get list of changed files in the table-definitions directory
+      CHANGED_FILES=$(git diff --name-only --diff-filter=AM $CI_COMMIT_BEFORE_SHA $CI_COMMIT_SHA -- ${TABLE_DEFINITIONS_DIR}/*.yaml ${TABLE_DEFINITIONS_DIR}/*.yml 2>/dev/null || git diff-tree --no-commit-id --name-only --diff-filter=AM -r $CI_COMMIT_SHA -- ${TABLE_DEFINITIONS_DIR}/*.yaml ${TABLE_DEFINITIONS_DIR}/*.yml)
+      
+      if [ -z "$CHANGED_FILES" ]; then
+        echo "No table definition files were added or modified."
+        exit 0
+      fi
+      
+      echo "Changed files:"
+      echo "$CHANGED_FILES"
+      
+      # Process each changed YAML file
+      for yaml_file in $CHANGED_FILES; do
+        if [ -f "$yaml_file" ]; then
+          echo "Processing $yaml_file..."
+      
+          # Convert YAML to JSON and create table
+          python3 -c "
+      import yaml
+      import json
+      import sys
+      
+      with open('$yaml_file', 'r') as f:
+          data = yaml.safe_load(f)
+      
+      print(json.dumps(data, indent=2))
+      " > /tmp/table_definition.json
+      
+          echo "Table definition JSON:"
+          cat /tmp/table_definition.json
+      
+          # Create the S3 table
+          echo "Creating S3 table from $yaml_file..."
+          aws s3tables create-table --cli-input-json file:///tmp/table_definition.json
+      
+          if [ $? -eq 0 ]; then
+            echo "✓ Successfully created table from $yaml_file"
+          else
+            echo "✗ Failed to create table from $yaml_file"
+            exit 1
+          fi
+        fi
+      done
+      
+      echo "All tables processed successfully!"
+  only:
+    changes:
+      - table-definitions/*.yaml
+      - table-definitions/*.yml
